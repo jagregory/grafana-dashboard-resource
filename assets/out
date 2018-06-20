@@ -1,0 +1,30 @@
+#!/bin/bash -e
+
+exec 3>&1 # make stdout available as fd 3 for the result
+exec 1>&2 # redirect all output to stderr for logging
+
+PATH=/usr/local/bin:$PATH
+
+dir=$1
+payload=/tmp/grafana-dashboard-request
+
+cat > $payload <&0
+
+url=$(jq -r '.params.url // ""' < $payload)
+token=$(jq -r '.params.token // ""' < $payload)
+path=$(jq -r '.params.path // ""' < $payload)
+
+dashboards=$(find "$path" -name '*.json' -mindepth 1 -maxdepth 1)
+
+responses='[]'
+
+for uri in $dashboards; do
+  name=$(basename "$uri" | cut -d. -f1)
+  content=$(cat "$uri")
+  body="{ \"dashboard\": $content, \"overwrite\": true }"
+
+  response=$(curl -s --data "$body" -H "Authorization: Bearer $token" -H 'Accept: application/json' -H 'Content-Type: application/json' $url/api/dashboards/db)
+  responses=$(echo "$responses" | jq ".+ [$response]")
+done
+
+echo "$responses" | jq -r . >&3

@@ -1,0 +1,33 @@
+#!/bin/bash -e
+
+exec 3>&1 # make stdout available as fd 3 for the result
+exec 1>&2 # redirect all output to stderr for logging
+
+PATH=/usr/local/bin:$PATH
+
+dir=$1
+payload=/tmp/grafana-dashboard-request
+
+cat > $payload <&0
+
+url=$(jq -r '.source.url // ""' < $payload)
+token=$(jq -r '.source.token // ""' < $payload)
+version=$(jq -r '.version // {}' < $payload)
+
+[ -d $dir ] || mkdir -p $dir
+
+dashboards=$(curl -s -H "Authorization: Bearer $token" -H 'Content-Type: application/json' $url/api/search?tag=sync | jq -r '.[].uri')
+responses='[]'
+
+for uri in $dashboards; do
+  name=$(echo "$uri" | cut -d/ -f2)
+  file="$name.json"
+  content=$(curl -s -H "Authorization: Bearer $token" -H 'Content-Type: application/json' $url/api/dashboards/$uri | jq .dashboard)
+  response=$(echo "$content" | jq '{name: .title, value: .version|tostring}')
+
+  echo "$content "> $dir/$file
+
+  responses=$(echo "$responses" | jq ".+ [$response]")
+done
+
+echo "$responses" | jq "{ version: $version, metadata: . }" >&3
